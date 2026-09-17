@@ -16,18 +16,10 @@
 
         <form id="roadForm">
             <div class="m-body">
-                <!-- Start and End Points -->
+                <!-- Road Section Name -->
                 <div class="sect">
-                    <div class="grid2">
-                        <div>
-                            <label class="lbl">START POINT</label>
-                            <input id="startPoint" name="startPoint" type="text" placeholder="e.g. Brgy. Poblacion" class="m-inp" required>
-                        </div>
-                        <div>
-                            <label class="lbl">END POINT</label>
-                            <input id="endPoint" name="endPoint" type="text" placeholder="e.g. Brgy. Mainit" class="m-inp" required>
-                        </div>
-                    </div>
+                    <label class="lbl">ROAD SECTION NAME</label>
+                    <input id="roadName" name="roadName" type="text" placeholder="e.g. Poblacion - Mainit Provincial Road" class="m-inp" required>
                 </div>
 
                 <div class="sect">
@@ -74,6 +66,10 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                         <span id="geojsonStatusText">Route not mapped yet</span>
                     </div>
+                    <div class="m-wrap left" style="margin-bottom: 12px;">
+                       <svg class="m-icon l" style="color:#94a3b8;" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                       <input id="locationSearchInput" type="text" placeholder="Search location and press Enter..." class="m-inp srch search-override" autocomplete="off">
+                    </div>
 
                     <div class="map-wrapper" id="roadMapWrapper">
                         <!-- Mission Control Status Pill -->
@@ -107,6 +103,10 @@
                             <button type="button" id="btnSetEnd" class="btn-terminal-action end">
                                 <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                                 SET END POINT
+                            </button>
+                            <button type="button" id="btnSetVia" class="btn-terminal-action via">
+                                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2.5"></circle><circle cx="12" cy="12" r="2.5" stroke-width="2.5"></circle></svg>
+                                SET VIA POINT
                             </button>
                         </div>
 
