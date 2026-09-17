@@ -65,6 +65,8 @@ window._roadState = window._roadState || {
 
 const itemsPerPage = 8;
 let drawingMap = null;
+let locationSearchMarker = null;
+let existingRoadsLayer = null;
 
 const getFormOverlay    = () => document.getElementById('roadFormModal');
 const getDetailsOverlay = () => document.getElementById('roadDetailsModal');
@@ -87,6 +89,9 @@ document.addEventListener('click', (e) => {
 
     const endBtn = e.target.closest('#btnSetEnd');
     if (endBtn) setMappingMode('end', endBtn);
+
+    const viaBtn = e.target.closest('#btnSetVia');
+    if (viaBtn) setMappingMode('via', viaBtn);
 
     const fsBtn = e.target.closest('#btnFullscreenMap');
     if (fsBtn) toggleFullscreen(fsBtn.closest('.map-wrapper'));
@@ -131,7 +136,7 @@ function setMappingMode(mode, btn) {
     const mapEl = document.getElementById('drawingMap');
     if (mapEl) mapEl.style.cursor = 'crosshair';
     const guidance = document.getElementById('missionGuidance');
-    const m = (mode || 'start').toUpperCase();
+    const m = mode === 'via' ? 'VIA' : (mode || 'start').toUpperCase();
     if (guidance) guidance.innerText = `MISSION: SELECT ROAD ${m} POINT...`;
     document.querySelectorAll('.btn-terminal-action').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
@@ -221,6 +226,9 @@ function initFirestoreListeners() {
     onSnapshot(qRoads, (snapshot) => {
         window._roadState.allRoads = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
         applyFilters();
+        if (drawingMap && getFormOverlay()?.classList.contains('active')) {
+            renderExistingRoadSections(window._roadState.currentRoadId);
+        }
     });
 }
 
@@ -234,7 +242,7 @@ function applyFilters() {
     window._roadState.filteredRoads = window._roadState.allRoads.filter(r => {
         const muniId  = r.lguId || r.municipality || "N/A";
         const statusVal = r.roadStatus || r.state || r.stateCategory || "Unknown";
-        const nameVal  = r.roadId || r.name || `${r.startPoint} - ${r.endPoint}` || "";
+        const nameVal  = r.roadName || r.roadId || r.name || `${r.startPoint} - ${r.endPoint}` || "";
         const matchMuni   = muni   === "All" || muniId  === muni;
         const matchStatus = status === "All" || statusVal === status;
         const matchPave   = pave   === "All" || r.pavementType  === pave;
@@ -243,8 +251,8 @@ function applyFilters() {
     });
 
     window._roadState.filteredRoads.sort((a, b) => {
-        const nameA = a.roadId || a.name || `${a.startPoint} - ${a.endPoint}` || "";
-        const nameB = b.roadId || b.name || `${b.startPoint} - ${b.endPoint}` || "";
+        const nameA = a.roadName || a.roadId || a.name || `${a.startPoint} - ${a.endPoint}` || "";
+        const nameB = b.roadName || b.roadId || b.name || `${b.startPoint} - ${b.endPoint}` || "";
         const dateA = a.createdAt?.toDate?.() || a.createdAt || 0;
         const dateB = b.createdAt?.toDate?.() || b.createdAt || 0;
         if (sort === "A-Z")          return nameA.localeCompare(nameB);
@@ -302,7 +310,7 @@ function renderTable() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                </button>`;
 
-        const curName = road.roadId || road.name || `${road.startPoint} - ${road.endPoint}`;
+        const curName = road.roadName || road.roadId || road.name || `${road.startPoint} - ${road.endPoint}`;
         row.innerHTML = `
             <div class="col">
                 <div class="road-name-main">${curName}</div>
@@ -348,10 +356,10 @@ function openRoadForm(road = null) {
     document.getElementById('geojsonStatusText').innerText = 'No road geometry captured yet';
     document.getElementById('geojsonStatus').classList.remove('success');
     document.getElementById('roadGeoJSON').value = '';
+    document.getElementById('totalDistance').innerText = '0.00 km';
     document.getElementById('roadFormTitle').innerText = road ? "EDIT ROAD SECTION" : "NEW ROAD SECTION RECORD";
     if (road) {
-        document.getElementById('startPoint').value      = road.startPoint || '';
-        document.getElementById('endPoint').value        = road.endPoint || '';
+        document.getElementById('roadName').value         = road.roadName || road.roadId || road.name || `${road.startPoint || ''}${road.endPoint ? ` - ${road.endPoint}` : ''}`;
         document.getElementById('roadMunicipality').value = road.lguId  || road.municipality || '';
         document.getElementById('pavementType').value    = road.pavementType || '';
         document.getElementById('stateCategory').value   = road.roadStatus || road.state || road.stateCategory || '';
@@ -374,14 +382,14 @@ const mapClickListener = (e) => {
         if (window._startMarker) drawingMap.removeLayer(window._startMarker);
         window._startMarker = L.marker(e.latlng, { draggable: true }).addTo(drawingMap);
         window._startMarker.on('dragend', updateRoute);
-        document.getElementById('mapStartLat').value = e.latlng.lat;
-        document.getElementById('mapStartLng').value = e.latlng.lng;
+    } else if (window._addingMode === 'via') {
+        if (window._viaMarker) drawingMap.removeLayer(window._viaMarker);
+        window._viaMarker = L.marker(e.latlng, { draggable: true }).addTo(drawingMap);
+        window._viaMarker.on('dragend', updateRoute);
     } else if (window._addingMode === 'end') {
         if (window._endMarker) drawingMap.removeLayer(window._endMarker);
         window._endMarker = L.marker(e.latlng, { draggable: true }).addTo(drawingMap);
         window._endMarker.on('dragend', updateRoute);
-        document.getElementById('mapEndLat').value = e.latlng.lat;
-        document.getElementById('mapEndLng').value = e.latlng.lng;
     }
     window._addingMode = 'none';
     document.getElementById('drawingMap').style.cursor = 'grab';
@@ -389,32 +397,85 @@ const mapClickListener = (e) => {
     updateRoute();
 };
 
+function setRouteData(route) {
+    if (!route) return;
+    const distanceKm = (route.summary.totalDistance / 1000).toFixed(2);
+    document.getElementById('roadGeoJSON').value = JSON.stringify({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: route.coordinates.map(c => [c.lng, c.lat]) },
+        properties: { distance: route.summary.totalDistance, updatedAt: new Date().toISOString() }
+    });
+    document.getElementById('totalDistance').innerText     = `${distanceKm} km`;
+    document.getElementById('missionGuidance').innerText   = `ROUTE SET: ${distanceKm}KM`;
+    document.getElementById('geojsonStatusText').innerText = `Route captured: ${distanceKm} km`;
+    document.getElementById('geojsonStatus').classList.add('success');
+}
+
 function updateRoute() {
     const start = window._startMarker;
+    const via   = window._viaMarker;
     const end   = window._endMarker;
     if (!start || !end) return;
     if (window._routingControl) drawingMap.removeControl(window._routingControl);
+    const waypoints = [start.getLatLng()];
+    if (via) waypoints.push(via.getLatLng());
+    waypoints.push(end.getLatLng());
     window._routingControl = L.Routing.control({
-        waypoints: [start.getLatLng(), end.getLatLng()],
+        waypoints,
         addWaypoints: false, draggableWaypoints: false,
+        showAlternatives: true,
         lineOptions: { styles: [{ color: '#78350F', opacity: 0.8, weight: 6 }] },
-        show: false, createMarker: () => null
+        altLineOptions: { styles: [{ color: '#94a3b8', opacity: 0.7, weight: 4 }] },
+        show: true,
+        createMarker: () => null
     }).addTo(drawingMap);
     window._routingControl.on('routesfound', (e) => {
-        const route      = e.routes[0];
-        const distanceKm = (route.summary.totalDistance / 1000).toFixed(2);
-        document.getElementById('roadGeoJSON').value = JSON.stringify({
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: route.coordinates.map(c => [c.lng, c.lat]) },
-            properties: { distance: route.summary.totalDistance, updatedAt: new Date().toISOString() }
-        });
-        document.getElementById('totalDistance').innerText    = `${distanceKm} km`;
-        document.getElementById('missionGuidance').innerText  = `TERMINAL: ${distanceKm}KM CAPTURED`;
-        document.getElementById('geojsonStatusText').innerText = `Route captured: ${distanceKm} km`;
-        document.getElementById('geojsonStatus').classList.add('success');
-        const container = document.querySelector('.leaflet-routing-container');
-        if (container) container.style.display = 'none';
+        setRouteData(e.routes[0]);
     });
+    window._routingControl.on('routeselected', (e) => {
+        setRouteData(e.route);
+        document.getElementById('missionGuidance').innerText = 'ROUTE UPDATED FROM ALTERNATIVE PATH';
+    });
+}
+
+function renderExistingRoadSections(excludeRoadId = null) {
+    if (!drawingMap) return;
+    if (existingRoadsLayer) drawingMap.removeLayer(existingRoadsLayer);
+    existingRoadsLayer = L.layerGroup().addTo(drawingMap);
+    (window._roadState.allRoads || [])
+        .filter(road => road.id !== excludeRoadId)
+        .forEach(road => {
+            const roadGeo = road.geojsonData || road.geoJSON;
+            if (!roadGeo) return;
+            try {
+                L.geoJSON(JSON.parse(roadGeo), {
+                    style: { color: '#94a3b8', weight: 3, opacity: 0.5, dashArray: '4 6' }
+                }).addTo(existingRoadsLayer);
+            } catch (e) {
+                console.error('Preview road parse failed', e);
+            }
+        });
+}
+
+async function searchLocationOnMap(queryText) {
+    if (!drawingMap || !queryText) return;
+    try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(queryText)}`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error('Search failed');
+        const result = await res.json();
+        if (!result.length) {
+            alert('No location found for your search.');
+            return;
+        }
+        const point = [parseFloat(result[0].lat), parseFloat(result[0].lon)];
+        drawingMap.setView(point, 14);
+        if (locationSearchMarker) drawingMap.removeLayer(locationSearchMarker);
+        locationSearchMarker = L.marker(point).addTo(drawingMap).bindPopup(result[0].display_name).openPopup();
+    } catch (err) {
+        console.error(err);
+        alert('Location search failed. Please try another keyword.');
+    }
 }
 
 function initDrawingMap(road) {
@@ -430,28 +491,42 @@ function initDrawingMap(road) {
         });
     }
     if (window._startMarker)    drawingMap.removeLayer(window._startMarker);
+    if (window._viaMarker)      drawingMap.removeLayer(window._viaMarker);
     if (window._endMarker)      drawingMap.removeLayer(window._endMarker);
     if (window._routingControl) drawingMap.removeControl(window._routingControl);
-    window._startMarker = window._endMarker = window._routingControl = null;
+    if (locationSearchMarker) drawingMap.removeLayer(locationSearchMarker);
+    locationSearchMarker = null;
+    window._startMarker = window._viaMarker = window._endMarker = window._routingControl = null;
     window._addingMode  = 'none';
     document.getElementById('drawingMap').style.cursor = 'grab';
+    renderExistingRoadSections(road?.id || null);
     const curGeo = road?.geojsonData || road?.geoJSON;
     if (curGeo) {
         try {
             const geo    = JSON.parse(curGeo);
             const coords = geo.geometry.coordinates;
             const start  = [coords[0][1], coords[0][0]];
+            const viaIdx = Math.floor(coords.length / 2);
+            const via    = coords.length > 2 ? [coords[viaIdx][1], coords[viaIdx][0]] : null;
             const end    = [coords[coords.length - 1][1], coords[coords.length - 1][0]];
             window._startMarker = L.marker(start, { draggable: true }).addTo(drawingMap);
+            if (via) window._viaMarker = L.marker(via, { draggable: true }).addTo(drawingMap);
             window._endMarker   = L.marker(end,   { draggable: true }).addTo(drawingMap);
             window._startMarker.on('dragend', updateRoute);
+            if (window._viaMarker) window._viaMarker.on('dragend', updateRoute);
             window._endMarker.on('dragend',   updateRoute);
             updateRoute();
-            setTimeout(() => drawingMap.fitBounds([start, end], { padding: [50, 50] }), 100);
+            setTimeout(() => drawingMap.fitBounds(via ? [start, via, end] : [start, end], { padding: [50, 50] }), 100);
         } catch (e) { console.error(e); }
     }
     setTimeout(() => drawingMap.invalidateSize(), 150);
 }
+
+document.getElementById('locationSearchInput')?.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    await searchLocationOnMap(e.target.value.trim());
+});
 
 window.viewRecord = (id) => {
     const road = window._roadState.allRoads.find(r => r.id === id);
@@ -460,7 +535,7 @@ window.viewRecord = (id) => {
 
     const set = (elId, val) => { const el = document.getElementById(elId); if (el) el.innerText = val; };
 
-    const roadName = road.roadId || road.name || `${road.startPoint} - ${road.endPoint}`;
+    const roadName = road.roadName || road.roadId || road.name || `${road.startPoint} - ${road.endPoint}`;
     const lguId = road.lguId || road.municipality || '';
     const targetLgu = window._roadState.allLGUs?.find(l => l.id === lguId || l.municipalityName === lguId);
     const muniName = targetLgu ? targetLgu.municipalityName : lguId;
@@ -545,14 +620,15 @@ document.getElementById('roadForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const geojsonData = document.getElementById('roadGeoJSON').value;
     if (!geojsonData) { alert("Please map the road first."); return; }
+    const roadName = document.getElementById('roadName').value.trim();
+    if (!roadName) { alert("Please enter a road section name."); return; }
 
     const kilometerText = document.getElementById('totalDistance').innerText;
     const kilometerVal = parseFloat(kilometerText.replace(' km', '')) || 0;
     const lguId = document.getElementById('roadMunicipality').value;
 
     const data = {
-        startPoint:    document.getElementById('startPoint').value,
-        endPoint:      document.getElementById('endPoint').value,
+        roadName:      roadName,
         kilometer:     kilometerVal,
         lguId:         lguId,
         pavementType:  document.getElementById('pavementType').value,
@@ -562,7 +638,7 @@ document.getElementById('roadForm')?.addEventListener('submit', async (e) => {
         updatedAt:     serverTimestamp()
     };
 
-    data.roadId = `${data.startPoint} - ${data.endPoint}`;
+    data.roadId = data.roadName;
     try {
         if (window._roadState.currentRoadId) {
             await updateDoc(doc(db, "RoadSections", window._roadState.currentRoadId), data);
@@ -617,7 +693,7 @@ async function executeMultiDelete() {
                     type: 'delete',
                     entity: 'road',
                     title: 'Road Deleted',
-                    message: `Road segment "${road.roadId || road.name}" was deleted.`
+                    message: `Road segment "${road.roadName || road.roadId || road.name}" was deleted.`
                 });
             }
         }
